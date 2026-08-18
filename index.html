@@ -130,7 +130,7 @@ textarea#promptInput:focus{border-color:var(--red)}
 }
 .btn-secondary:hover{border-color:var(--ink);transform:translateY(-1px)}
 
-/* ---------- PREVIEW CARD (same design as fixed template) ---------- */
+/* ---------- PREVIEW CARD ---------- */
 .prompt-wrapper{
   max-width:640px;
   width:100%;
@@ -294,13 +294,6 @@ pre#previewText{
     toastTimer = setTimeout(() => toast.classList.remove("show"), 2800);
   }
 
-  function copyToClipboard(text) {
-    if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
-      return navigator.clipboard.writeText(text).catch(() => legacyCopy(text));
-    }
-    return Promise.resolve(legacyCopy(text));
-  }
-
   function legacyCopy(text) {
     const ta = document.createElement("textarea");
     ta.value = text;
@@ -308,12 +301,26 @@ pre#previewText{
     ta.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0";
     document.body.appendChild(ta);
     ta.focus(); ta.select();
-    try { document.execCommand("copy"); } catch (e) {}
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
     document.body.removeChild(ta);
+    return ok;
+  }
+
+  // Returns a promise. Always resolves (never throws) so callers can chain safely.
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).catch(() => legacyCopy(text));
+    }
+    return Promise.resolve(legacyCopy(text));
   }
 
   copyBtn.addEventListener("click", function () {
-    copyToClipboard(previewText.textContent).then(() => {
+    copyToClipboard(previewText.textContent).then((ok) => {
+      if (ok === false) {
+        showToast("Copy blocked by browser — select & copy manually");
+        return;
+      }
       showToast("Prompt copied! 🎉");
       const original = copyBtn.innerHTML;
       copyBtn.innerHTML = "✅ Copied";
@@ -331,13 +338,23 @@ pre#previewText{
     gemini:  "Prompt copied! Opening Gemini… ✨"
   };
 
+  // FIX: open the new tab synchronously (inside the click handler, before any
+  // await/.then()), otherwise browsers treat the later window.open() call as
+  // not being tied to a user gesture and silently block it as a popup.
   function openAI(platform, button) {
     button.classList.add("loading");
+    const win = window.open("about:blank", "_blank", "noopener,noreferrer");
     copyToClipboard(previewText.textContent).then(() => {
       showToast(TOAST_MSGS[platform]);
-      window.open(AI_SITES[platform], "_blank", "noopener");
+      if (win && !win.closed) {
+        win.location.href = AI_SITES[platform];
+      } else {
+        // Popup was blocked even for the synchronous call — fall back so the
+        // user still gets somewhere instead of a dead button.
+        window.location.href = AI_SITES[platform];
+      }
+      button.classList.remove("loading");
     });
-    setTimeout(() => button.classList.remove("loading"), 600);
   }
   chatgptBtn.addEventListener("click", function () { openAI("chatgpt", chatgptBtn); });
   geminiBtn.addEventListener("click", function () { openAI("gemini", geminiBtn); });
@@ -423,12 +440,20 @@ pre{padding:26px;margin:0;font-family:'SF Mono',Monaco,'Cascadia Code',ui-monosp
         toast=document.getElementById("toast");
   let toastTimer=null;
   function showToast(m){toast.textContent=m;toast.classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove("show"),2800);}
-  function legacyCopy(t){const ta=document.createElement("textarea");ta.value=t;ta.style.cssText="position:fixed;top:-9999px;left:-9999px";document.body.appendChild(ta);ta.focus();ta.select();try{document.execCommand("copy");}catch(e){}document.body.removeChild(ta);}
+  function legacyCopy(t){const ta=document.createElement("textarea");ta.value=t;ta.style.cssText="position:fixed;top:-9999px;left:-9999px";document.body.appendChild(ta);ta.focus();ta.select();let ok=false;try{ok=document.execCommand("copy");}catch(e){ok=false;}document.body.removeChild(ta);return ok;}
   function copyToClipboard(t){if(navigator.clipboard&&navigator.clipboard.writeText&&window.isSecureContext){return navigator.clipboard.writeText(t).catch(()=>legacyCopy(t));}return Promise.resolve(legacyCopy(t));}
-  copyBtn.addEventListener("click",function(){copyToClipboard(promptEl.textContent).then(()=>{showToast("Prompt copied! 🎉");const o=copyBtn.innerHTML;copyBtn.innerHTML="✅ Copied";setTimeout(()=>copyBtn.innerHTML=o,1500);});});
+  copyBtn.addEventListener("click",function(){copyToClipboard(promptEl.textContent).then((ok)=>{if(ok===false){showToast("Copy blocked — select & copy manually");return;}showToast("Prompt copied! 🎉");const o=copyBtn.innerHTML;copyBtn.innerHTML="✅ Copied";setTimeout(()=>copyBtn.innerHTML=o,1500);});});
   const SITES={chatgpt:"https://chat.openai.com/",gemini:"https://gemini.google.com/app"};
   const MSGS={chatgpt:"Prompt copied! Opening ChatGPT… 🤖",gemini:"Prompt copied! Opening Gemini… ✨"};
-  function openAI(p,btn){copyToClipboard(promptEl.textContent).then(()=>{showToast(MSGS[p]);window.open(SITES[p],"_blank","noopener");});}
+  function openAI(p,btn){
+    // open synchronously first so the browser still counts this as a
+    // user-gesture-triggered navigation, THEN copy + redirect the new tab.
+    const win=window.open("about:blank","_blank","noopener,noreferrer");
+    copyToClipboard(promptEl.textContent).then(()=>{
+      showToast(MSGS[p]);
+      if(win&&!win.closed){win.location.href=SITES[p];}else{window.location.href=SITES[p];}
+    });
+  }
   chatgptBtn.addEventListener("click",function(){openAI("chatgpt",chatgptBtn);});
   geminiBtn.addEventListener("click",function(){openAI("gemini",geminiBtn);});
 })();
